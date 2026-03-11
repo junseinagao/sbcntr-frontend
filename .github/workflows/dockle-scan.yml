@@ -1,0 +1,47 @@
+name: Dockle Security Scan
+
+on:
+  pull_request:
+    branches: [v2]
+
+env:
+  APP_NAME: sbcntr-frontend-app
+
+jobs:
+  dockle-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set short SHA
+        run: echo "SHORT_SHA=$(echo ${{ github.event.pull_request.head.sha }} | cut -c1-7)" >> $GITHUB_ENV
+
+      - name: Build Docker image
+        run: |
+          docker build -t ${{ env.APP_NAME }}:${{ env.SHORT_SHA }} .
+
+      - name: Install Dockle
+        run: |
+          VERSION=$(curl --silent "https://api.github.com/repos/goodwithtech/dockle/releases/latest" | \
+            grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+          curl -L -o dockle.deb https://github.com/goodwithtech/dockle/releases/download/${VERSION}/dockle_${VERSION#v}_Linux-64bit.deb
+          sudo dpkg -i dockle.deb
+
+      - name: Run Dockle scan
+        run: |
+          dockle --exit-code 1 --exit-level FATAL ${{ env.APP_NAME }}:${{ env.SHORT_SHA }}
+
+      - name: Generate security report
+        if: always()
+        run: |
+          dockle --format json --output dockle-report.json ${{ env.APP_NAME }}:${{ env.SHORT_SHA }}
+          dockle --format table ${{ env.APP_NAME }}:${{ env.SHORT_SHA }}
+
+      - name: Upload Dockle report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dockle-report
+          path: dockle-report.json
